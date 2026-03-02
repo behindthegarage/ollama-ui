@@ -1,0 +1,318 @@
+import requests
+import uuid
+from datetime import datetime
+from flask import request, jsonify, current_app, render_template
+from .config import OLLAMA_URL, MAX_FILE_SIZE
+from .models import get_db_connection
+
+def register_routes(app):
+    
+    @app.route('/')
+    def index():
+        """Serve the main UI."""
+        return render_template('index.html')
+    @app.route('/api/health', methods=['GET'])
+    def health_check():
+        """Health check - also fetches Ollama models."""
+        try:
+            response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+            if response.status_code == 200:
+                models = response.json().get('models', [])
+                return jsonify({
+                    "status": "healthy",
+                    "ollama_connected": True,
+                    "models_count": len(models),
+                    "models": models
+                })
+            else:
+                return jsonify({
+                    "status": "degraded",
+                    "ollama_connected": False,
+                    "error": f"Ollama returned status {response.status_code}"
+                }), 503
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                "status": "degraded",
+                "ollama_connected": False,
+                "error": str(e)
+            }), 503
+    
+    @app.route('/api/models', methods=['GET'])
+    def list_models():
+        """List available models from Trantor."""
+        try:
+            response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=10)
+            response.raise_for_status()
+            return jsonify(response.json())
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Failed to fetch models: {str(e)}"}), 502
+    
+    @app.route('/api/chat', methods=['POST'])
+    def chat():
+        """Proxy to Ollama with file context injection."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body required"}), 400
+            
+            model = data.get('model')
+            messages = data.get('messages', [])
+            file_ids = data.get('files', [])
+            
+            if not model:
+                return jsonify({"error": "Model is required"}), 400
+            if not messages:
+                return jsonify({"error": "Messages are required"}), 400
+            
+            # Inject file context into the first user message
+            if file_ids and len(messages) > 0:
+                file_context = "You have access to the following files:\n"
+                for file_id in file_ids:
+                    file_data = current_app.file_storage.get(file_id)
+                    if file_data:
+                        file_context += f"\n### File: {file_data['name']}\n{file_data['content']}\n"
+                
+                # Find first user message and prepend context
+                for msg in messages:
+                    if msg.get('role') == 'user':
+                        msg['content'] = file_context + "\n" + msg['content']
+                        break
+            
+            # Proxy to Ollama
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False
+            }
+            
+            response = requests.post(
+                f"{OLLAMA_URL}/api/chat",
+                json=payload,
+                timeout=120
+            )
+            response.raise_for_status()
+            return jsonify(response.json())
+            
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Ollama request failed: {str(e)}"}), 502
+        except Exception as e:
+            return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    
+    @app.route('/api/files', methods=['POST'])
+    def upload_file():
+        """Upload files - store in memory."""
+        try:
+            if 'file' not in request.files:
+                return jsonify({"error": "No file provided"}), 400
+            
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({"error": "No file selected"}), 400
+            
+            content = file.read()
+            size = len(content)
+            
+            if size > MAX_FILE_SIZE:
+                return jsonify({"error": f"File too large. Max size: {MAX_FILE_SIZE / (1024*1024):.1f}MB"}), 413
+            
+            file_id = str(uuid.uuid4())
+            
+            # Store in app file_storage
+            current_app.file_storage[file_id] = {
+                "id": file_id,
+                "name": file.filename,
+                "size": size,
+                "content": content.decode('utf-8', errors='replace')
+            }
+            
+            return jsonify({
+                "id": file_id,
+                "name": file.filename,
+                "size": size
+            })
+            
+        except Exception as e:
+            return jsonify({"error": f"Upload failed: {str(e)}"}), 500
+    
+    @app.route('/api/files/<file_id>', methods=['GET'])
+    def get_file(file_id):
+        """Get file content by id."""
+        try:
+            file_data = current_app.file_storage.get(file_id)
+            if not file_data:
+                return jsonify({"error": "File not found"}), 404
+            
+            return jsonify({
+                "id": file_data['id'],
+                "name": file_data['name'],
+                "size": file_data['size'],
+                "content": file_data['content']
+            })
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to retrieve file: {str(e)}"}), 500
+    
+    @app.route('/api/sessions', methods=['GET'])
+    def list_sessions():
+        """List all chat sessions."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, title, model, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            
+            sessions = []
+            for row in rows:
+                sessions.append({
+                    "id": row['id'],
+                    "title": row['title'],
+                    "model": row['model'],
+                    "created_at": row['created_at'],
+                    "updated_at": row['updated_at']
+                })
+            
+            return jsonify({"sessions": sessions})
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to fetch sessions: {str(e)}"}), 500
+    
+    @app.route('/api/sessions', methods=['POST'])
+    def create_session():
+        """Create a new chat session."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body required"}), 400
+            
+            title = data.get('title', 'New Chat')
+            model = data.get('model', 'llama2')
+            
+            session_id = str(uuid.uuid4())
+            now = datetime.now().isoformat()
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (session_id, title, model, now, now)
+            )
+            conn.commit()
+            conn.close()
+            
+            return jsonify({
+                "id": session_id,
+                "title": title,
+                "model": model,
+                "created_at": now,
+                "updated_at": now
+            }), 201
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to create session: {str(e)}"}), 500
+    
+    @app.route('/api/sessions/<session_id>', methods=['GET'])
+    def get_session(session_id):
+        """Get messages for a session."""
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get session info
+            cursor.execute(
+                "SELECT id, title, model, created_at, updated_at FROM sessions WHERE id = ?",
+                (session_id,)
+            )
+            session_row = cursor.fetchone()
+            
+            if not session_row:
+                conn.close()
+                return jsonify({"error": "Session not found"}), 404
+            
+            # Get messages
+            cursor.execute(
+                "SELECT id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+                (session_id,)
+            )
+            message_rows = cursor.fetchall()
+            conn.close()
+            
+            messages = []
+            for row in message_rows:
+                messages.append({
+                    "id": row['id'],
+                    "role": row['role'],
+                    "content": row['content'],
+                    "created_at": row['created_at']
+                })
+            
+            return jsonify({
+                "session": {
+                    "id": session_row['id'],
+                    "title": session_row['title'],
+                    "model": session_row['model'],
+                    "created_at": session_row['created_at'],
+                    "updated_at": session_row['updated_at']
+                },
+                "messages": messages
+            })
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to fetch session: {str(e)}"}), 500
+    
+    @app.route('/api/sessions/<session_id>/messages', methods=['POST'])
+    def add_message(session_id):
+        """Add a message to a session."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body required"}), 400
+            
+            role = data.get('role')
+            content = data.get('content')
+            
+            if not role or not content:
+                return jsonify({"error": "Role and content are required"}), 400
+            
+            if role not in ['user', 'assistant', 'system']:
+                return jsonify({"error": "Role must be 'user', 'assistant', or 'system'"}), 400
+            
+            now = datetime.now().isoformat()
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check if session exists
+            cursor.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+            if not cursor.fetchone():
+                conn.close()
+                return jsonify({"error": "Session not found"}), 404
+            
+            # Insert message
+            cursor.execute(
+                "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                (session_id, role, content, now)
+            )
+            message_id = cursor.lastrowid
+            
+            # Update session's updated_at
+            cursor.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                (now, session_id)
+            )
+            
+            conn.commit()
+            conn.close()
+            
+            return jsonify({
+                "id": message_id,
+                "session_id": session_id,
+                "role": role,
+                "content": content,
+                "created_at": now
+            }), 201
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to add message: {str(e)}"}), 500

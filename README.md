@@ -1,0 +1,100 @@
+# Ollama UI
+
+A lightweight, file-aware chat interface for local LLM inference with Ollama.
+
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+![Flask](https://img.shields.io/badge/Flask-3.0+-green.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+## Features
+
+- 🚀 **Direct Ollama Integration** — Bypasses streaming limitations with `stream: false`
+- 📁 **File Context Injection** — Upload files and include them in your prompts
+- 💬 **Session Management** — Persistent chat history with SQLite
+- 🎨 **Modern UI** — Dark theme, responsive design, drag-and-drop file upload
+- 🤖 **Multi-Model Support** — Switch between all your Ollama models instantly
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- [Ollama](https://ollama.com/) running locally or on your network
+
+### Installation
+
+```bash
+git clone https://github.com/behindthegarage/ollama-ui.git
+cd ollama-ui
+pip install -r requirements.txt
+```
+
+### Configuration
+
+Edit `app/config.py` to point to your Ollama instance:
+
+```python
+OLLAMA_URL = "http://localhost:11434"  # or your Ollama host
+```
+
+### Run
+
+```bash
+python run.py
+```
+
+Open http://localhost:5000 in your browser.
+
+## Usage
+
+1. **Select a model** from the dropdown
+2. **Start chatting** — type your message and press Enter
+3. **Attach files** — drag & drop files or click the attach button
+4. **Files are injected** into the context automatically with your first message
+
+## Architecture
+
+```
+Frontend (Vanilla JS)  →  Flask API  →  Ollama (/api/chat)
+     ↓                          ↓
+  Dark UI              SQLite Sessions
+  Drag-drop            File Context Injection
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check + model list |
+| `/api/models` | GET | List available Ollama models |
+| `/api/chat` | POST | Send chat with optional file context |
+| `/api/files` | POST | Upload a file |
+| `/api/sessions` | GET/POST | List/create sessions |
+| `/api/sessions/<id>` | GET | Get session messages |
+
+## File Context Injection
+
+When you attach files to a message, they're prepended to your prompt:
+
+```
+You have access to the following files:
+### File: document.txt
+[file content here]
+
+[your actual message]
+```
+
+## Development
+
+Built with:
+- **Backend:** Flask, Flask-CORS, SQLite
+- **Frontend:** Vanilla JavaScript (no frameworks)
+- **Styling:** Custom CSS with CSS variables
+
+## License
+
+MIT
+
+## Credits
+
+Built by [BehindTheGarage](https://github.com/behindthegarage)

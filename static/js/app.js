@@ -131,7 +131,7 @@ async function sendMessage(content, files) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        messages: currentSession.messages,
+        messages: currentSession.messages.map(({files, ...msg}) => msg),  // Strip files property
         files: files.map(f => ({ id: f.id, name: f.name, content: f.content }))
       })
     });

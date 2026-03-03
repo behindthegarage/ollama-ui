@@ -88,16 +88,18 @@ You have access to the following files:
 
 ### Vision Models
 
-Not all vision models work via the HTTP API:
+Most vision models work well. If you encounter errors, try re-pulling the model:
 
-| Model | Vision Support | Notes |
-|-------|---------------|-------|
-| `llava:13b` | ✅ Working | Recommended for image analysis |
-| `llava:34b` | ✅ Working | Larger version, more capable |
-| `qwen3-vl:30b` | ❌ Not working | Works in Ollama desktop app but crashes via HTTP API |
-| `gemma3:27b` | ⚠️ Untested | May work, needs verification |
+```bash
+ollama rm <model>
+ollama pull <model>
+```
 
-**Recommendation:** Use `llava:13b` or `llava:34b` for image analysis.
+**Working vision models:**
+- ✅ `qwen3-vl:30b` — Multimodal, excellent vision capabilities
+- ✅ `qwen3-vl:latest` — Smaller 8B version
+- ✅ `llava:13b` — Reliable fallback
+- ✅ `llava:34b` — Larger version for more complex analysis
 
 ### Model-Specific Timeouts (AMD/ROCm)
 

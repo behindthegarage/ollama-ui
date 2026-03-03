@@ -86,6 +86,19 @@ You have access to the following files:
 
 ## Known Issues
 
+### Vision Models
+
+Not all vision models work via the HTTP API:
+
+| Model | Vision Support | Notes |
+|-------|---------------|-------|
+| `llava:13b` | ✅ Working | Recommended for image analysis |
+| `llava:34b` | ✅ Working | Larger version, more capable |
+| `qwen3-vl:30b` | ❌ Not working | Works in Ollama desktop app but crashes via HTTP API |
+| `gemma3:27b` | ⚠️ Untested | May work, needs verification |
+
+**Recommendation:** Use `llava:13b` or `llava:34b` for image analysis.
+
 ### Model-Specific Timeouts (AMD/ROCm)
 
 On AMD GPUs using ROCm (e.g., RX 9070 XT), some models may hit the 120s Ollama timeout:

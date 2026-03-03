@@ -885,11 +885,27 @@ html, body {
 /* Mobile Sidebar Toggle */
 .mobile-menu-btn {
   display: none;
-  background: none;
-  border: none;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 8px;
+  padding: 10px;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.mobile-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.mobile-menu-btn:active {
+  background: var(--accent);
+  color: white;
 }
 
 .mobile-menu-btn svg {
@@ -897,8 +913,12 @@ html, body {
   height: 24px;
 }
 
-/* Responsive */
+/* ============================================
+   MOBILE RESPONSIVE STYLES
+   ============================================ */
+
 @media (max-width: 768px) {
+  /* Sidebar as slide-out drawer */
   .sidebar {
     position: fixed;
     left: 0;
@@ -906,36 +926,16 @@ html, body {
     bottom: 0;
     z-index: 100;
     transform: translateX(-100%);
+    width: 280px;
+    max-width: 85vw;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.4);
   }
 
   .sidebar.open {
     transform: translateX(0);
   }
 
-  .main-content {
-    width: 100%;
-  }
-
-  .mobile-menu-btn {
-    display: block;
-  }
-
-  .chat-header {
-    padding: 12px 16px;
-  }
-
-  .chat-container {
-    padding: 16px;
-  }
-
-  .message {
-    max-width: 90%;
-  }
-
-  .input-area {
-    padding: 12px 16px 16px;
-  }
-
+  /* Sidebar overlay backdrop */
   .overlay-backdrop {
     display: none;
     position: fixed;
@@ -943,12 +943,500 @@ html, body {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
     z-index: 99;
+    opacity: 0;
+    transition: opacity 0.3s ease;
   }
 
   .overlay-backdrop.active {
     display: block;
+    opacity: 1;
+  }
+
+  /* Main content full width */
+  .main-content {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Show hamburger menu */
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  /* Chat Header - optimized for mobile */
+  .chat-header {
+    padding: 12px 16px;
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .chat-title {
+    font-size: 16px;
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Model selector - compact on mobile */
+  .model-selector {
+    gap: 6px;
+  }
+
+  .model-selector label {
+    font-size: 12px;
+    display: none; /* Hide label to save space */
+  }
+
+  .model-selector select {
+    font-size: 14px;
+    padding: 8px 28px 8px 12px;
+    min-height: 40px;
+    max-width: 140px;
+  }
+
+  /* Chat Container - maximize space */
+  .chat-container {
+    padding: 16px 12px;
+    gap: 20px;
+  }
+
+  /* Welcome Screen - mobile optimized */
+  .welcome-screen {
+    padding: 24px;
+  }
+
+  .welcome-screen h1 {
+    font-size: 28px;
+  }
+
+  .welcome-screen p {
+    font-size: 16px;
+  }
+
+  /* Messages - full width on mobile */
+  .message {
+    max-width: 100%;
+    gap: 10px;
+  }
+
+  .message-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .message-bubble {
+    padding: 14px 18px;
+    font-size: 16px; /* Larger font for readability */
+    line-height: 1.7;
+  }
+
+  /* Code blocks - better mobile experience */
+  .message-bubble pre {
+    padding: 14px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .message-bubble pre code {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .message-bubble code {
+    font-size: 14px;
+    padding: 3px 8px;
+  }
+
+  /* File attachments in messages */
+  .message-file {
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+
+  /* Input Area - thumb-friendly with safe area for mobile browser chrome */
+  .input-area {
+    padding: 12px 12px max(24px, env(safe-area-inset-bottom, 24px));
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    position: relative;
+    z-index: 10;
+  }
+
+  .input-container {
+    border-radius: 16px;
+    max-width: 100%;
+  }
+
+  .input-row {
+    padding: 14px;
+    gap: 12px;
+    align-items: center;
+  }
+
+  /* Message input - prevent iOS zoom */
+  .message-input {
+    font-size: 16px; /* Critical: 16px prevents zoom on iOS */
+    line-height: 1.6;
+    min-height: 48px;
+    max-height: 120px;
+  }
+
+  /* Touch-friendly buttons - min 44px */
+  .icon-btn {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 12px;
+  }
+
+  .icon-btn svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .send-btn {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 12px;
+  }
+
+  .send-btn svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* File attachments area */
+  .file-attachments {
+    padding: 14px 16px 8px;
+    gap: 10px;
+  }
+
+  .file-attachment {
+    padding: 8px 14px;
+    font-size: 14px;
+    border-radius: 24px;
+  }
+
+  .file-remove {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* Sidebar improvements for touch */
+  .sidebar-header {
+    padding: 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .new-chat-btn {
+    padding: 16px 20px;
+    font-size: 16px;
+    min-height: 52px;
+    border-radius: 12px;
+  }
+
+  .new-chat-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .sidebar-content {
+    padding: 16px 12px;
+  }
+
+  /* Session items - larger touch targets */
+  .session-item {
+    padding: 14px 14px;
+    font-size: 15px;
+    min-height: 48px;
+    margin-bottom: 4px;
+    border-radius: 10px;
+  }
+
+  .session-item svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Projects section */
+  .projects-section {
+    margin-top: 20px;
+    padding-top: 20px;
+  }
+
+  .projects-header {
+    padding: 0 14px 14px;
+    font-size: 13px;
+  }
+
+  .projects-header svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .project-header {
+    padding: 12px 14px;
+    font-size: 15px;
+    min-height: 48px;
+    border-radius: 10px;
+  }
+
+  .project-header svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .project-files {
+    padding-left: 32px;
+  }
+
+  .project-file-item {
+    padding: 10px 12px;
+    min-height: 44px;
+  }
+
+  .project-file-name {
+    font-size: 14px;
+  }
+
+  .add-context-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    min-height: 32px;
+  }
+
+  /* Empty states */
+  .empty-sessions {
+    padding: 40px 20px;
+    font-size: 15px;
+  }
+
+  .empty-projects {
+    padding: 24px 20px;
+    font-size: 14px;
+  }
+
+  .sidebar-footer {
+    padding: 16px;
+    font-size: 13px;
+  }
+
+  /* Error/Success messages - full width on mobile */
+  .error-message,
+  .success-message {
+    top: auto;
+    bottom: 20px;
+    left: 16px;
+    right: 16px;
+    padding: 16px 20px;
+    font-size: 15px;
+  }
+
+  /* Drag overlay */
+  .drag-content {
+    margin: 20px;
+    padding: 40px 32px;
+  }
+
+  .drag-content svg {
+    width: 56px;
+    height: 56px;
+  }
+
+  .drag-content h3 {
+    font-size: 22px;
+  }
+
+  .drag-content p {
+    font-size: 15px;
+  }
+
+  /* Loading indicator */
+  .loading-indicator {
+    padding: 20px;
+  }
+
+  .loading-dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* Typing indicator */
+  .typing-indicator {
+    padding: 14px 18px;
+  }
+
+  .typing-indicator .dot {
+    width: 8px;
+    height: 8px;
+  }
+}
+
+/* ============================================
+   SMALL MOBILE DEVICES (max-width: 480px)
+   ============================================ */
+
+@media (max-width: 480px) {
+  /* Even more compact for small phones */
+  .chat-header {
+    padding: 10px 12px;
+    min-height: 56px;
+  }
+
+  .chat-title {
+    font-size: 15px;
+  }
+
+  .model-selector select {
+    font-size: 13px;
+    padding: 6px 24px 6px 10px;
+    max-width: 120px;
+    min-height: 36px;
+  }
+
+  .chat-container {
+    padding: 12px 10px;
+    gap: 16px;
+  }
+
+  .message-bubble {
+    padding: 12px 16px;
+    font-size: 15px;
+  }
+
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+
+  /* Input area - even more thumb-friendly */
+  .input-area {
+    padding: 10px 10px 16px;
+  }
+
+  .input-row {
+    padding: 12px;
+  }
+
+  .message-input {
+    font-size: 16px; /* Keep 16px to prevent zoom */
+  }
+
+  .icon-btn,
+  .send-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 260px;
+  }
+
+  .new-chat-btn {
+    padding: 14px 18px;
+    font-size: 15px;
+    min-height: 48px;
+  }
+
+  .session-item {
+    padding: 12px 12px;
+    font-size: 14px;
+  }
+
+  /* Welcome screen */
+  .welcome-screen h1 {
+    font-size: 24px;
+  }
+
+  .welcome-screen p {
+    font-size: 15px;
+  }
+}
+
+/* ============================================
+   LANDSCAPE ORIENTATION OPTIMIZATIONS
+   ============================================ */
+
+@media (max-width: 768px) and (orientation: landscape) {
+  /* Smaller header in landscape to maximize chat space */
+  .chat-header {
+    min-height: 52px;
+    padding: 8px 16px;
+  }
+
+  /* Reduce padding in landscape */
+  .chat-container {
+    padding: 12px 16px;
+  }
+
+  /* More compact input */
+  .input-area {
+    padding: 10px 12px 12px;
+  }
+
+  .message-input {
+    max-height: 80px;
+  }
+}
+
+/* ============================================
+   TOUCH DEVICE OPTIMIZATIONS
+   ============================================ */
+
+@media (hover: none) and (pointer: coarse) {
+  /* Better touch feedback */
+  .session-item:active,
+  .project-header:active,
+  .icon-btn:active,
+  .send-btn:active,
+  .new-chat-btn:active,
+  .mobile-menu-btn:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+
+  /* Remove hover effects on touch devices */
+  .session-item:hover,
+  .project-header:hover,
+  .icon-btn:hover,
+  .send-btn:hover {
+    background: inherit;
+  }
+
+  .session-item:active {
+    background: var(--bg-hover);
+  }
+
+  .project-header:active {
+    background: var(--bg-hover);
+  }
+
+  /* Larger touch targets for file attachments */
+  .file-remove {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Better scrolling */
+  .chat-container,
+  .sidebar-content {
+    -webkit-overflow-scrolling: touch;
   }
 }
 

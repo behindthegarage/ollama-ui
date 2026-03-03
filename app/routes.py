@@ -1,9 +1,13 @@
+import os
 import requests
 import uuid
 from datetime import datetime
 from flask import request, jsonify, current_app, render_template
 from .config import OLLAMA_URL, MAX_FILE_SIZE
 from .models import get_db_connection
+
+# Base directory for projects
+PROJECTS_DIR = "/home/openclaw/.openclaw/workspace/projects"
 
 def register_routes(app):
     
@@ -88,7 +92,7 @@ def register_routes(app):
             response = requests.post(
                 f"{OLLAMA_URL}/api/chat",
                 json=payload,
-                timeout=120
+                timeout=None
             )
             response.raise_for_status()
             return jsonify(response.json())
@@ -316,3 +320,100 @@ def register_routes(app):
             
         except Exception as e:
             return jsonify({"error": f"Failed to add message: {str(e)}"}), 500
+
+    # ============ PROJECT ENDPOINTS ============
+    
+    @app.route('/api/projects', methods=['GET'])
+    def list_projects():
+        """List all project directories."""
+        try:
+            projects = []
+            if os.path.exists(PROJECTS_DIR):
+                for item in os.listdir(PROJECTS_DIR):
+                    item_path = os.path.join(PROJECTS_DIR, item)
+                    # Only include directories, skip hidden files
+                    if os.path.isdir(item_path) and not item.startswith('.'):
+                        projects.append(item)
+            
+            return jsonify({"projects": sorted(projects)})
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to list projects: {str(e)}"}), 500
+
+    @app.route('/api/projects/<name>/files', methods=['GET'])
+    def list_project_files(name):
+        """List all .md files in a project directory."""
+        try:
+            project_path = os.path.join(PROJECTS_DIR, name)
+            
+            # Security check: ensure path is within projects directory
+            if not os.path.abspath(project_path).startswith(os.path.abspath(PROJECTS_DIR)):
+                return jsonify({"error": "Invalid project name"}), 400
+            
+            if not os.path.exists(project_path) or not os.path.isdir(project_path):
+                return jsonify({"error": "Project not found"}), 404
+            
+            md_files = []
+            for item in os.listdir(project_path):
+                if item.endswith('.md'):
+                    md_files.append(item)
+            
+            # Sort files alphabetically
+            md_files.sort()
+            
+            # Determine primary file
+            primary_file = None
+            if f"{name}.md" in md_files:
+                primary_file = f"{name}.md"
+            elif "README.md" in md_files:
+                primary_file = "README.md"
+            elif md_files:
+                primary_file = md_files[0]
+            
+            # Build response
+            files = []
+            for filename in md_files:
+                files.append({
+                    "name": filename,
+                    "path": os.path.join(project_path, filename),
+                    "is_primary": filename == primary_file
+                })
+            
+            return jsonify({"files": files})
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to list project files: {str(e)}"}), 500
+
+    @app.route('/api/projects/<name>/read', methods=['POST'])
+    def read_project_file(name):
+        """Read content of a specific file in a project."""
+        try:
+            data = request.get_json()
+            if not data or 'file_path' not in data:
+                return jsonify({"error": "file_path is required"}), 400
+            
+            file_path = data['file_path']
+            
+            # Security check: must be within projects directory and be a .md file
+            abs_path = os.path.abspath(file_path)
+            abs_projects_dir = os.path.abspath(PROJECTS_DIR)
+            
+            if not abs_path.startswith(abs_projects_dir):
+                return jsonify({"error": "Access denied: file outside projects directory"}), 403
+            
+            if not file_path.endswith('.md'):
+                return jsonify({"error": "Only .md files are allowed"}), 403
+            
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                return jsonify({"error": "File not found"}), 404
+            
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            
+            return jsonify({
+                "name": os.path.basename(file_path),
+                "content": content
+            })
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to read file: {str(e)}"}), 500

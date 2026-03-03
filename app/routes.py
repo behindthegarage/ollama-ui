@@ -55,13 +55,17 @@ def register_routes(app):
     def chat():
         """Proxy to Ollama with file context injection."""
         try:
+            import sys
+            print("DEBUG: Starting chat request", file=sys.stderr)
             data = request.get_json()
+            print(f"DEBUG: Got data: {type(data)}", file=sys.stderr)
             if not data:
                 return jsonify({"error": "Request body required"}), 400
             
             model = data.get('model')
             messages = data.get('messages', [])
             files = data.get('files', [])
+            print(f"DEBUG: model={model}, messages={len(messages)}, files={len(files)}", file=sys.stderr)
             
             if not model:
                 return jsonify({"error": "Model is required"}), 400
@@ -70,20 +74,27 @@ def register_routes(app):
             
             # Deep copy messages to avoid modifying the original
             import copy
-            messages = copy.deepcopy(messages)
+            try:
+                messages = copy.deepcopy(messages)
+            except Exception as e:
+                print(f"DEBUG: deepcopy failed: {e}", file=sys.stderr)
+                messages = list(messages)  # shallow copy as fallback
+            
+            print(f"DEBUG: messages after copy: {messages}", file=sys.stderr)
             
             # Inject file context into the first user message
             if files and len(messages) > 0:
                 file_context = "You have access to the following files:\n"
                 for file_item in files:
+                    print(f"DEBUG: processing file_item: {type(file_item)}", file=sys.stderr)
                     # Handle both file_id references and full file objects
                     if isinstance(file_item, str):
-                        # Legacy: file_id reference
+                        print("DEBUG: file_item is string", file=sys.stderr)
                         file_data = current_app.file_storage.get(file_item)
                         if file_data:
                             file_context += f"\n### File: {file_data['name']}\n{file_data['content']}\n"
                     elif isinstance(file_item, dict):
-                        # New: full file object with content
+                        print("DEBUG: file_item is dict", file=sys.stderr)
                         file_name = file_item.get('name', 'unnamed')
                         file_content = file_item.get('content', '')
                         # Decode base64 if needed
@@ -95,12 +106,15 @@ def register_routes(app):
                             pass  # Use as-is if not base64
                         file_context += f"\n### File: {file_name}\n{file_content}\n"
                 
+                print(f"DEBUG: file_context built, now injecting", file=sys.stderr)
                 # Find first user message and prepend context
                 for msg in messages:
+                    print(f"DEBUG: checking msg role: {msg.get('role')}", file=sys.stderr)
                     if msg.get('role') == 'user':
                         msg['content'] = file_context + "\n" + msg['content']
                         break
             
+            print("DEBUG: Building payload", file=sys.stderr)
             # Proxy to Ollama
             payload = {
                 "model": model,
@@ -108,17 +122,25 @@ def register_routes(app):
                 "stream": False
             }
             
-            response = requests.post(
-                f"{OLLAMA_URL}/api/chat",
-                json=payload,
-                timeout=None
-            )
-            response.raise_for_status()
-            return jsonify(response.json())
+            print(f"DEBUG: Sending to Ollama: {payload}", file=sys.stderr)
+            try:
+                response = requests.post(
+                    f"{OLLAMA_URL}/api/chat",
+                    json=payload,
+                    timeout=None
+                )
+                response.raise_for_status()
+                return jsonify(response.json())
+            except Exception as e:
+                import traceback
+                print(f"Ollama request error: {e}", file=sys.stderr)
+                print(traceback.format_exc(), file=sys.stderr)
+                return jsonify({"error": f"Ollama request failed: {str(e)}"}), 502
             
-        except requests.exceptions.RequestException as e:
-            return jsonify({"error": f"Ollama request failed: {str(e)}"}), 502
         except Exception as e:
+            import traceback, sys
+            print(f"Chat error: {e}", file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
             return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
     
     @app.route('/api/files', methods=['POST'])

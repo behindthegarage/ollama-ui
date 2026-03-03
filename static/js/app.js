@@ -10,6 +10,27 @@ let models = [];
 let attachedFiles = [];
 let isLoading = false;
 let sessions = [];
+let projects = [];
+let expandedProjects = new Set();
+let loadedPrimaryFiles = new Set(); // Track which projects have had their primary file auto-loaded
+
+// Helper function to safely encode UTF-8 strings to base64
+function utf8ToBase64(str) {
+  const utf8Bytes = new TextEncoder().encode(str);
+  let binary = '';
+  utf8Bytes.forEach(byte => binary += String.fromCharCode(byte));
+  return btoa(binary);
+}
+
+// Helper function to decode base64 to UTF-8 string
+function base64ToUtf8(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}
 
 // DOM Elements
 const elements = {
@@ -18,6 +39,8 @@ const elements = {
   newChatBtn: document.getElementById('newChatBtn'),
   sessionList: document.getElementById('sessionList'),
   emptySessions: document.getElementById('emptySessions'),
+  projectList: document.getElementById('projectList'),
+  emptyProjects: document.getElementById('emptyProjects'),
   mobileMenuBtn: document.getElementById('mobileMenuBtn'),
   chatTitle: document.getElementById('chatTitle'),
   modelSelect: document.getElementById('modelSelect'),
@@ -39,6 +62,7 @@ function init() {
   loadModels();
   setupEventListeners();
   loadSessions();
+  loadProjects();
 }
 
 // API Functions
@@ -46,7 +70,7 @@ async function loadModels() {
   try {
     const response = await fetch('/api/models');
     if (!response.ok) throw new Error('Failed to load models');
-    
+
     models = await response.json();
     populateModelSelector();
   } catch (error) {
@@ -57,10 +81,10 @@ async function loadModels() {
 
 function populateModelSelector() {
   elements.modelSelect.innerHTML = '<option value="" disabled selected>Select model...</option>';
-  
+
   // Handle both {models: [...]} and direct array formats
   const modelList = models.models || models;
-  
+
   modelList.forEach(model => {
     const option = document.createElement('option');
     option.value = model.name || model.id || model;
@@ -77,7 +101,7 @@ async function loadSessions() {
 
 async function sendMessage(content, files) {
   if (isLoading) return;
-  
+
   const model = elements.modelSelect.value;
   if (!model) {
     showError('Please select a model first');
@@ -86,7 +110,7 @@ async function sendMessage(content, files) {
 
   isLoading = true;
   updateSendButton();
-  
+
   // Create session if needed
   if (!currentSession) {
     createNewSession();
@@ -120,7 +144,7 @@ async function sendMessage(content, files) {
     }
 
     const data = await response.json();
-    
+
     // Add assistant message - handle Ollama format {message: {role, content}}
     let content = '';
     if (data.message && data.message.content) {
@@ -136,7 +160,7 @@ async function sendMessage(content, files) {
     currentSession.messages.push(assistantMessage);
     renderMessage(assistantMessage);
     scrollToBottom();
-    
+
     // Update session title if first message
     if (currentSession.messages.length === 2) {
       currentSession.title = content.slice(0, 30) + (content.length > 30 ? '...' : '');
@@ -162,15 +186,15 @@ function createNewSession() {
     createdAt: new Date()
   };
   sessions.unshift(currentSession);
-  
+
   // Clear chat and show welcome
   elements.chatContainer.innerHTML = '';
   elements.chatContainer.appendChild(elements.welcomeScreen);
   elements.welcomeScreen.style.display = 'flex';
-  
+
   elements.chatTitle.textContent = 'New Conversation';
   renderSessionList();
-  
+
   // Close mobile sidebar
   closeSidebar();
 }
@@ -178,17 +202,17 @@ function createNewSession() {
 function loadSession(sessionId) {
   const session = sessions.find(s => s.id === sessionId);
   if (!session) return;
-  
+
   currentSessionId = sessionId;
   currentSession = session;
-  
+
   // Hide welcome screen
   elements.welcomeScreen.style.display = 'none';
-  
+
   // Clear and render messages
   elements.chatContainer.innerHTML = '';
   session.messages.forEach(msg => renderMessage(msg));
-  
+
   elements.chatTitle.textContent = session.title;
   renderSessionList();
   scrollToBottom();
@@ -197,14 +221,14 @@ function loadSession(sessionId) {
 
 function renderSessionList() {
   elements.sessionList.innerHTML = '';
-  
+
   if (sessions.length === 0) {
     elements.emptySessions.style.display = 'block';
     return;
   }
-  
+
   elements.emptySessions.style.display = 'none';
-  
+
   sessions.forEach(session => {
     const li = document.createElement('li');
     li.className = 'session-item' + (session.id === currentSessionId ? ' active' : '');
@@ -219,16 +243,189 @@ function renderSessionList() {
   });
 }
 
+// ============ PROJECT FUNCTIONS ============
+
+async function loadProjects() {
+  try {
+    const response = await fetch('/api/projects');
+    if (!response.ok) throw new Error('Failed to load projects');
+
+    const data = await response.json();
+    projects = data.projects || [];
+    renderProjectsList();
+  } catch (error) {
+    console.error('Failed to load projects:', error);
+    projects = [];
+    renderProjectsList();
+  }
+}
+
+function renderProjectsList() {
+  elements.projectList.innerHTML = '';
+
+  if (projects.length === 0) {
+    elements.emptyProjects.style.display = 'block';
+    return;
+  }
+
+  elements.emptyProjects.style.display = 'none';
+
+  projects.forEach(projectName => {
+    const li = document.createElement('li');
+    li.className = 'project-item';
+    li.dataset.projectName = projectName;
+
+    const isExpanded = expandedProjects.has(projectName);
+    const hasFiles = projects[projectName] && projects[projectName].files;
+
+    li.innerHTML = `
+      <div class="project-header ${isExpanded ? 'expanded' : ''}" onclick="toggleProject('${projectName}')">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="project-chevron">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="project-icon">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+        </svg>
+        <span class="project-name">${escapeHtml(projectName)}</span>
+      </div>
+      <ul class="project-files" id="project-files-${projectName}" style="display: ${isExpanded ? 'block' : 'none'};"></ul>
+    `;
+
+    elements.projectList.appendChild(li);
+
+    // If already expanded and we have files, render them
+    if (isExpanded && hasFiles) {
+      renderProjectFiles(projectName, projects[projectName].files);
+    }
+  });
+}
+
+async function toggleProject(projectName) {
+  const isExpanded = expandedProjects.has(projectName);
+  const projectItem = elements.projectList.querySelector(`[data-project-name="${projectName}"]`);
+  const filesList = document.getElementById(`project-files-${projectName}`);
+  const header = projectItem.querySelector('.project-header');
+
+  if (isExpanded) {
+    // Collapse
+    expandedProjects.delete(projectName);
+    header.classList.remove('expanded');
+    filesList.style.display = 'none';
+  } else {
+    // Expand
+    expandedProjects.add(projectName);
+    header.classList.add('expanded');
+    filesList.style.display = 'block';
+
+    // Load files if not already loaded
+    if (!projects[projectName] || !projects[projectName].files) {
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectName)}/files`);
+        if (!response.ok) throw new Error('Failed to load project files');
+
+        const data = await response.json();
+
+        // Store files in projects object for caching
+        if (!projects[projectName]) projects[projectName] = {};
+        projects[projectName].files = data.files || [];
+
+        renderProjectFiles(projectName, data.files);
+
+        // Auto-add primary file if not already loaded for this project
+        const primaryFile = data.files.find(f => f.is_primary);
+        if (primaryFile && !loadedPrimaryFiles.has(projectName)) {
+          loadedPrimaryFiles.add(projectName);
+          await addProjectFileToContext(projectName, primaryFile);
+        }
+      } catch (error) {
+        console.error('Failed to load project files:', error);
+        filesList.innerHTML = '<li class="project-file-item"><span class="project-file-name">Error loading files</span></li>';
+      }
+    }
+  }
+}
+
+function renderProjectFiles(projectName, files) {
+  const filesList = document.getElementById(`project-files-${projectName}`);
+  filesList.innerHTML = '';
+
+  if (files.length === 0) {
+    filesList.innerHTML = '<li class="project-file-item"><span class="project-file-name">No .md files found</span></li>';
+    return;
+  }
+
+  files.forEach(file => {
+    const fileItem = document.createElement('li');
+    fileItem.className = 'project-file-item';
+
+    fileItem.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+      </svg>
+      ${file.is_primary ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="primary-star"><path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" /></svg>` : ''}
+      <span class="project-file-name">${escapeHtml(file.name)}</span>
+      <button class="add-context-btn" onclick="addProjectFileToContext('${projectName}', {name: '${file.name}', path: '${file.path}', is_primary: ${file.is_primary}})" title="Add to context">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+        Add
+      </button>
+    `;
+
+    filesList.appendChild(fileItem);
+  });
+}
+
+async function addProjectFileToContext(projectName, file) {
+  try {
+    // Check if file is already attached
+    const existingFile = attachedFiles.find(f => f.name === file.name && f.project === projectName);
+    if (existingFile) {
+      showError(`File "${file.name}" is already in context`);
+      return;
+    }
+
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectName)}/read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: file.path })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to read file');
+    }
+
+    const data = await response.json();
+
+    // Add to attachedFiles
+    attachedFiles.push({
+      id: 'project_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+      name: data.name,
+      content: utf8ToBase64(data.content), // UTF-8 safe base64 encode
+      project: projectName
+    });
+
+    renderFileAttachments();
+
+    // Show success feedback
+    showSuccess(`Added "${data.name}" to context`);
+
+  } catch (error) {
+    showError('Failed to add file: ' + error.message);
+  }
+}
+
 function renderMessage(message) {
   // Hide welcome screen if visible
   elements.welcomeScreen.style.display = 'none';
-  
+
   const messageEl = document.createElement('div');
   messageEl.className = `message ${message.role}`;
-  
+
   const avatar = message.role === 'user' ? 'U' : 'AI';
   const renderedContent = renderMarkdown(message.content);
-  
+
   let filesHtml = '';
   if (message.files && message.files.length > 0) {
     filesHtml = `
@@ -244,7 +441,7 @@ function renderMessage(message) {
       </div>
     `;
   }
-  
+
   messageEl.innerHTML = `
     <div class="message-avatar">${avatar}</div>
     <div class="message-content">
@@ -252,32 +449,32 @@ function renderMessage(message) {
       ${filesHtml}
     </div>
   `;
-  
+
   elements.chatContainer.appendChild(messageEl);
 }
 
 function renderMarkdown(text) {
   if (!text) return '';
-  
+
   // Escape HTML first
   let html = escapeHtml(text);
-  
+
   // Code blocks
   html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-  
+
   // Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  
+
   // Bold
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  
+
   // Italic
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
-  
+
   // Line breaks
   html = html.replace(/\n/g, '<br>');
-  
+
   return html;
 }
 
@@ -322,10 +519,26 @@ function showError(message) {
     ${escapeHtml(message)}
   `;
   document.body.appendChild(errorEl);
-  
+
   setTimeout(() => {
     errorEl.remove();
   }, 5000);
+}
+
+function showSuccess(message) {
+  const successEl = document.createElement('div');
+  successEl.className = 'success-message';
+  successEl.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+    ${escapeHtml(message)}
+  `;
+  document.body.appendChild(successEl);
+
+  setTimeout(() => {
+    successEl.remove();
+  }, 3000);
 }
 
 function updateSendButton() {
@@ -358,14 +571,17 @@ function renderFileAttachments() {
     elements.fileAttachments.innerHTML = '';
     return;
   }
-  
+
   elements.fileAttachments.style.display = 'flex';
   elements.fileAttachments.innerHTML = attachedFiles.map((file, index) => `
     <div class="file-attachment">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.122 2.122l7.81-7.81" />
+        ${file.project ? 
+          '<path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />' :
+          '<path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.122 2.122l7.81-7.81" />'
+        }
       </svg>
-      <span>${escapeHtml(file.name)}</span>
+      <span>${file.project ? file.project + '/' : ''}${escapeHtml(file.name)}</span>
       <button class="file-remove" data-index="${index}" title="Remove file">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -395,23 +611,23 @@ function closeSidebar() {
 function setupEventListeners() {
   // New chat
   elements.newChatBtn.addEventListener('click', createNewSession);
-  
+
   // Mobile menu
   elements.mobileMenuBtn.addEventListener('click', openSidebar);
   elements.overlayBackdrop.addEventListener('click', closeSidebar);
-  
+
   // Send message
   elements.sendBtn.addEventListener('click', () => {
     const content = elements.messageInput.value.trim();
     if (!content && attachedFiles.length === 0) return;
-    
+
     sendMessage(content, [...attachedFiles]);
     elements.messageInput.value = '';
     elements.messageInput.style.height = 'auto';
     attachedFiles = [];
     renderFileAttachments();
   });
-  
+
   // Input handling
   elements.messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
@@ -419,25 +635,25 @@ function setupEventListeners() {
       elements.sendBtn.click();
     }
   });
-  
+
   // Auto-resize textarea
   elements.messageInput.addEventListener('input', () => {
     elements.messageInput.style.height = 'auto';
     elements.messageInput.style.height = Math.min(elements.messageInput.scrollHeight, 200) + 'px';
   });
-  
+
   // File attachment
   elements.attachBtn.addEventListener('click', () => {
     elements.fileInput.click();
   });
-  
+
   elements.fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
       handleFiles(e.target.files);
       elements.fileInput.value = '';
     }
   });
-  
+
   // File remove buttons (event delegation)
   elements.fileAttachments.addEventListener('click', (e) => {
     const removeBtn = e.target.closest('.file-remove');
@@ -446,10 +662,10 @@ function setupEventListeners() {
       removeFile(index);
     }
   });
-  
+
   // Drag and drop
   let dragCounter = 0;
-  
+
   document.addEventListener('dragenter', (e) => {
     e.preventDefault();
     dragCounter++;
@@ -457,7 +673,7 @@ function setupEventListeners() {
       elements.dragOverlay.classList.add('active');
     }
   });
-  
+
   document.addEventListener('dragleave', (e) => {
     e.preventDefault();
     dragCounter--;
@@ -465,16 +681,16 @@ function setupEventListeners() {
       elements.dragOverlay.classList.remove('active');
     }
   });
-  
+
   document.addEventListener('dragover', (e) => {
     e.preventDefault();
   });
-  
+
   document.addEventListener('drop', (e) => {
     e.preventDefault();
     dragCounter = 0;
     elements.dragOverlay.classList.remove('active');
-    
+
     if (e.dataTransfer.files.length > 0) {
       handleFiles(e.dataTransfer.files);
     }

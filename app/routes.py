@@ -53,19 +53,15 @@ def register_routes(app):
     
     @app.route('/api/chat', methods=['POST'])
     def chat():
-        """Proxy to Ollama with file context injection."""
+        """Proxy to Ollama with file context injection and vision support."""
         try:
-            import sys
-            print("DEBUG: Starting chat request", file=sys.stderr)
             data = request.get_json()
-            print(f"DEBUG: Got data: {type(data)}", file=sys.stderr)
             if not data:
                 return jsonify({"error": "Request body required"}), 400
             
             model = data.get('model')
             messages = data.get('messages', [])
             files = data.get('files', [])
-            print(f"DEBUG: model={model}, messages={len(messages)}, files={len(files)}", file=sys.stderr)
             
             if not model:
                 return jsonify({"error": "Model is required"}), 400
@@ -77,44 +73,56 @@ def register_routes(app):
             try:
                 messages = copy.deepcopy(messages)
             except Exception as e:
-                print(f"DEBUG: deepcopy failed: {e}", file=sys.stderr)
                 messages = list(messages)  # shallow copy as fallback
             
-            print(f"DEBUG: messages after copy: {messages}", file=sys.stderr)
+            # Image extensions for vision models
+            IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff'}
             
-            # Inject file context into the first user message
-            if files and len(messages) > 0:
-                file_context = "You have access to the following files:\n"
+            # Process files - separate images from text
+            image_files = []
+            text_context = ""
+            
+            if files and len(files) > 0:
                 for file_item in files:
-                    print(f"DEBUG: processing file_item: {type(file_item)}", file=sys.stderr)
-                    # Handle both file_id references and full file objects
                     if isinstance(file_item, str):
-                        print("DEBUG: file_item is string", file=sys.stderr)
+                        # Legacy: file_id reference
                         file_data = current_app.file_storage.get(file_item)
                         if file_data:
-                            file_context += f"\n### File: {file_data['name']}\n{file_data['content']}\n"
+                            file_name = file_data.get('name', '')
+                            file_ext = os.path.splitext(file_name)[1].lower()
+                            if file_ext in IMAGE_EXTENSIONS:
+                                image_files.append(file_data.get('content', ''))
+                            else:
+                                text_context += f"\n### File: {file_name}\n{file_data.get('content', '')}\n"
                     elif isinstance(file_item, dict):
-                        print("DEBUG: file_item is dict", file=sys.stderr)
+                        # New: full file object with content
                         file_name = file_item.get('name', 'unnamed')
                         file_content = file_item.get('content', '')
-                        # Decode base64 if needed
-                        try:
-                            import base64
-                            decoded = base64.b64decode(file_content).decode('utf-8', errors='replace')
-                            file_content = decoded
-                        except:
-                            pass  # Use as-is if not base64
-                        file_context += f"\n### File: {file_name}\n{file_content}\n"
-                
-                print(f"DEBUG: file_context built, now injecting", file=sys.stderr)
-                # Find first user message and prepend context
-                for msg in messages:
-                    print(f"DEBUG: checking msg role: {msg.get('role')}", file=sys.stderr)
-                    if msg.get('role') == 'user':
-                        msg['content'] = file_context + "\n" + msg['content']
-                        break
+                        file_ext = os.path.splitext(file_name)[1].lower()
+                        
+                        if file_ext in IMAGE_EXTENSIONS:
+                            # For images: add raw base64 to images array
+                            image_files.append(file_content)
+                        else:
+                            # For text: decode and add to context
+                            try:
+                                import base64
+                                decoded = base64.b64decode(file_content).decode('utf-8', errors='replace')
+                                text_context += f"\n### File: {file_name}\n{decoded}\n"
+                            except:
+                                text_context += f"\n### File: {file_name}\n{file_content}\n"
             
-            print("DEBUG: Building payload", file=sys.stderr)
+            # Find first user message and modify it
+            for msg in messages:
+                if msg.get('role') == 'user':
+                    # Add text context if any
+                    if text_context:
+                        msg['content'] = "You have access to the following files:\n" + text_context + "\n" + msg['content']
+                    # Add images if any
+                    if image_files:
+                        msg['images'] = image_files
+                    break
+            
             # Proxy to Ollama
             payload = {
                 "model": model,
@@ -122,23 +130,18 @@ def register_routes(app):
                 "stream": False
             }
             
-            print(f"DEBUG: Sending to Ollama: {payload}", file=sys.stderr)
-            try:
-                response = requests.post(
-                    f"{OLLAMA_URL}/api/chat",
-                    json=payload,
-                    timeout=None
-                )
-                response.raise_for_status()
-                return jsonify(response.json())
-            except Exception as e:
-                import traceback
-                print(f"Ollama request error: {e}", file=sys.stderr)
-                print(traceback.format_exc(), file=sys.stderr)
-                return jsonify({"error": f"Ollama request failed: {str(e)}"}), 502
+            response = requests.post(
+                f"{OLLAMA_URL}/api/chat",
+                json=payload,
+                timeout=None
+            )
+            response.raise_for_status()
+            return jsonify(response.json())
             
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Ollama request failed: {str(e)}"}), 502
         except Exception as e:
-            import traceback, sys
+            import traceback
             print(f"Chat error: {e}", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
             return jsonify({"error": f"Unexpected error: {str(e)}"}), 500

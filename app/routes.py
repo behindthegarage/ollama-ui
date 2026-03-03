@@ -61,20 +61,39 @@ def register_routes(app):
             
             model = data.get('model')
             messages = data.get('messages', [])
-            file_ids = data.get('files', [])
+            files = data.get('files', [])
             
             if not model:
                 return jsonify({"error": "Model is required"}), 400
             if not messages:
                 return jsonify({"error": "Messages are required"}), 400
             
+            # Deep copy messages to avoid modifying the original
+            import copy
+            messages = copy.deepcopy(messages)
+            
             # Inject file context into the first user message
-            if file_ids and len(messages) > 0:
+            if files and len(messages) > 0:
                 file_context = "You have access to the following files:\n"
-                for file_id in file_ids:
-                    file_data = current_app.file_storage.get(file_id)
-                    if file_data:
-                        file_context += f"\n### File: {file_data['name']}\n{file_data['content']}\n"
+                for file_item in files:
+                    # Handle both file_id references and full file objects
+                    if isinstance(file_item, str):
+                        # Legacy: file_id reference
+                        file_data = current_app.file_storage.get(file_item)
+                        if file_data:
+                            file_context += f"\n### File: {file_data['name']}\n{file_data['content']}\n"
+                    elif isinstance(file_item, dict):
+                        # New: full file object with content
+                        file_name = file_item.get('name', 'unnamed')
+                        file_content = file_item.get('content', '')
+                        # Decode base64 if needed
+                        try:
+                            import base64
+                            decoded = base64.b64decode(file_content).decode('utf-8', errors='replace')
+                            file_content = decoded
+                        except:
+                            pass  # Use as-is if not base64
+                        file_context += f"\n### File: {file_name}\n{file_content}\n"
                 
                 # Find first user message and prepend context
                 for msg in messages:

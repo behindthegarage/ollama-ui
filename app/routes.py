@@ -1,6 +1,8 @@
 import os
+import re
 import requests
 import uuid
+import base64
 from datetime import datetime
 from flask import request, jsonify, current_app, render_template
 from .config import OLLAMA_URL, MAX_FILE_SIZE
@@ -8,6 +10,14 @@ from .models import get_db_connection
 
 # Base directory for projects
 PROJECTS_DIR = "/home/openclaw/.openclaw/workspace/projects"
+
+def is_base64(content):
+    """Check if content is a valid base64 string."""
+    if not content or not isinstance(content, str):
+        return False
+    # Base64 strings contain only A-Z, a-z, 0-9, +, /, and = padding
+    pattern = r'^[A-Za-z0-9+/]*={0,2}$'
+    return bool(re.match(pattern, content)) and len(content) % 4 == 0
 
 def register_routes(app):
     
@@ -105,11 +115,11 @@ def register_routes(app):
                             image_files.append(file_content)
                         else:
                             # For text: decode and add to context
-                            try:
-                                import base64
+                            if is_base64(file_content):
                                 decoded = base64.b64decode(file_content).decode('utf-8', errors='replace')
                                 text_context += f"\n### File: {file_name}\n{decoded}\n"
-                            except:
+                            else:
+                                # Content is already text (not base64)
                                 text_context += f"\n### File: {file_name}\n{file_content}\n"
             
             # Find first user message and modify it
@@ -129,6 +139,10 @@ def register_routes(app):
                 "messages": messages,
                 "stream": False
             }
+            
+            # Debug: log the payload to see if images are included
+            import sys
+            print(f"PAYLOAD: {payload}", file=sys.stderr)
             
             response = requests.post(
                 f"{OLLAMA_URL}/api/chat",

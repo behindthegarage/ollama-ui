@@ -94,9 +94,18 @@ function populateModelSelector() {
 }
 
 async function loadSessions() {
-  // Sessions are stored in memory for now
-  // In a full implementation, this would fetch from the backend
-  renderSessionList();
+  try {
+    const response = await fetch('/api/sessions');
+    if (!response.ok) throw new Error('Failed to load sessions');
+
+    const data = await response.json();
+    sessions = data.sessions || [];
+    renderSessionList();
+  } catch (error) {
+    console.error('Failed to load sessions:', error);
+    sessions = [];
+    renderSessionList();
+  }
 }
 
 async function sendMessage(content, files) {
@@ -113,7 +122,7 @@ async function sendMessage(content, files) {
 
   // Create session if needed
   if (!currentSession) {
-    createNewSession();
+    await createNewSession();
   }
 
   // Add user message to UI immediately
@@ -121,6 +130,33 @@ async function sendMessage(content, files) {
   currentSession.messages.push(userMessage);
   renderMessage(userMessage);
   scrollToBottom();
+
+  // Save user message to database
+  try {
+    await fetch(`/api/sessions/${currentSession.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'user', content })
+    });
+  } catch (error) {
+    console.error('Failed to save user message:', error);
+  }
+
+  // Update session title from first user message if it's still default
+  if (currentSession.messages.length === 1 && currentSession.title === 'New Conversation') {
+    currentSession.title = content.slice(0, 30) + (content.length > 30 ? '...' : '');
+    renderSessionList();
+    // Update title in database
+    try {
+      await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: currentSession.title, model })
+      });
+    } catch (e) {
+      // Silent fail - title update is not critical
+    }
+  }
 
   // Show loading indicator
   const loadingId = showLoadingIndicator();
@@ -146,25 +182,30 @@ async function sendMessage(content, files) {
     const data = await response.json();
 
     // Add assistant message - handle Ollama format {message: {role, content}}
-    let content = '';
+    let assistantContent = '';
     if (data.message && data.message.content) {
-      content = data.message.content;
+      assistantContent = data.message.content;
     } else if (data.response) {
-      content = data.response;
+      assistantContent = data.response;
     } else if (data.content) {
-      content = data.content;
+      assistantContent = data.content;
     } else {
-      content = JSON.stringify(data);
+      assistantContent = JSON.stringify(data);
     }
-    const assistantMessage = { role: 'assistant', content: content };
+    const assistantMessage = { role: 'assistant', content: assistantContent };
     currentSession.messages.push(assistantMessage);
     renderMessage(assistantMessage);
     scrollToBottom();
 
-    // Update session title if first message
-    if (currentSession.messages.length === 2) {
-      currentSession.title = content.slice(0, 30) + (content.length > 30 ? '...' : '');
-      renderSessionList();
+    // Save assistant message to database
+    try {
+      await fetch(`/api/sessions/${currentSession.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'assistant', content: assistantContent })
+      });
+    } catch (error) {
+      console.error('Failed to save assistant message:', error);
     }
 
   } catch (error) {
@@ -177,15 +218,40 @@ async function sendMessage(content, files) {
 }
 
 // UI Functions
-function createNewSession() {
-  currentSessionId = Date.now().toString();
-  currentSession = {
-    id: currentSessionId,
-    title: 'New Conversation',
-    messages: [],
-    createdAt: new Date()
-  };
-  sessions.unshift(currentSession);
+async function createNewSession() {
+  const model = elements.modelSelect.value || 'llama2';
+
+  try {
+    // Create session in database
+    const response = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New Conversation', model })
+    });
+
+    if (!response.ok) throw new Error('Failed to create session');
+
+    const sessionData = await response.json();
+    currentSessionId = sessionData.id;
+    currentSession = {
+      id: sessionData.id,
+      title: sessionData.title,
+      messages: [],
+      createdAt: new Date(sessionData.created_at)
+    };
+    sessions.unshift(currentSession);
+  } catch (error) {
+    console.error('Failed to create session in DB, using local fallback:', error);
+    // Fallback to local-only session
+    currentSessionId = Date.now().toString();
+    currentSession = {
+      id: currentSessionId,
+      title: 'New Conversation',
+      messages: [],
+      createdAt: new Date()
+    };
+    sessions.unshift(currentSession);
+  }
 
   // Clear chat and show welcome
   elements.chatContainer.innerHTML = '';
@@ -199,24 +265,39 @@ function createNewSession() {
   closeSidebar();
 }
 
-function loadSession(sessionId) {
-  const session = sessions.find(s => s.id === sessionId);
-  if (!session) return;
+async function loadSession(sessionId) {
+  try {
+    // Fetch session from database
+    const response = await fetch(`/api/sessions/${sessionId}`);
+    if (!response.ok) throw new Error('Failed to load session');
 
-  currentSessionId = sessionId;
-  currentSession = session;
+    const data = await response.json();
+    const sessionData = data.session;
+    const messages = data.messages || [];
 
-  // Hide welcome screen
-  elements.welcomeScreen.style.display = 'none';
+    currentSessionId = sessionId;
+    currentSession = {
+      id: sessionData.id,
+      title: sessionData.title,
+      messages: messages,
+      createdAt: new Date(sessionData.created_at)
+    };
 
-  // Clear and render messages
-  elements.chatContainer.innerHTML = '';
-  session.messages.forEach(msg => renderMessage(msg));
+    // Hide welcome screen
+    elements.welcomeScreen.style.display = 'none';
 
-  elements.chatTitle.textContent = session.title;
-  renderSessionList();
-  scrollToBottom();
-  closeSidebar();
+    // Clear and render messages
+    elements.chatContainer.innerHTML = '';
+    messages.forEach(msg => renderMessage(msg));
+
+    elements.chatTitle.textContent = sessionData.title;
+    renderSessionList();
+    scrollToBottom();
+    closeSidebar();
+  } catch (error) {
+    console.error('Failed to load session:', error);
+    showError('Failed to load session: ' + error.message);
+  }
 }
 
 function renderSessionList() {

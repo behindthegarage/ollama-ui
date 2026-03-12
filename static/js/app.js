@@ -15,6 +15,7 @@ let expandedProjects = new Set();
 let loadedPrimaryFiles = new Set(); // Track which projects have had their primary file auto-loaded
 let ollamaConnected = true; // Track Ollama connection status
 let failedMessages = new Map(); // Store failed messages for retry
+let ollamaUrl = null; // Ollama URL from localStorage or server default
 
 // Helper function to safely encode UTF-8 strings to base64
 function utf8ToBase64(str) {
@@ -56,17 +57,63 @@ const elements = {
   fileInput: document.getElementById('fileInput'),
   dragOverlay: document.getElementById('dragOverlay'),
   connectionIndicator: document.getElementById('connectionIndicator'),
-  retryConnectionBtn: document.getElementById('retryConnectionBtn')
+  retryConnectionBtn: document.getElementById('retryConnectionBtn'),
+  // Keyboard shortcuts modal
+  keyboardShortcutsBtn: document.getElementById('keyboardShortcutsBtn'),
+  shortcutsModal: document.getElementById('shortcutsModal'),
+  shortcutsModalBackdrop: document.getElementById('shortcutsModalBackdrop'),
+  shortcutsModalClose: document.getElementById('shortcutsModalClose'),
+  // Settings modal
+  settingsBtn: document.getElementById('settingsBtn'),
+  settingsModal: document.getElementById('settingsModal'),
+  settingsModalBackdrop: document.getElementById('settingsModalBackdrop'),
+  settingsModalClose: document.getElementById('settingsModalClose'),
+  ollamaUrlInput: document.getElementById('ollamaUrlInput'),
+  testConnectionBtn: document.getElementById('testConnectionBtn'),
+  saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+  connectionTestResult: document.getElementById('connectionTestResult')
 };
 
 // Initialize the app
 document.addEventListener('DOMContentLoaded', init);
 
 function init() {
+  loadConfig();
   loadModels();
   setupEventListeners();
+  setupKeyboardShortcuts();
+  setupModals();
   loadSessions();
   loadProjects();
+}
+
+// Configuration Management
+function loadConfig() {
+  // Load Ollama URL from localStorage, fall back to server default
+  const storedUrl = localStorage.getItem('ollamaUrl');
+  if (storedUrl) {
+    ollamaUrl = storedUrl;
+  }
+  
+  // Update settings input if it exists
+  if (elements.ollamaUrlInput) {
+    elements.ollamaUrlInput.value = ollamaUrl || '';
+  }
+}
+
+function saveConfig() {
+  const url = elements.ollamaUrlInput.value.trim();
+  if (url) {
+    ollamaUrl = url;
+    localStorage.setItem('ollamaUrl', url);
+    return true;
+  }
+  return false;
+}
+
+// Get the effective Ollama URL (localStorage or null for server default)
+function getOllamaUrl() {
+  return ollamaUrl;
 }
 
 // API Functions
@@ -794,15 +841,165 @@ function removeFile(index) {
   renderFileAttachments();
 }
 
-// Sidebar
-function openSidebar() {
-  elements.sidebar.classList.add('open');
-  elements.overlayBackdrop.classList.add('active');
+// Keyboard Shortcuts
+function setupKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const modKey = isMac ? e.metaKey : e.ctrlKey;
+    
+    // Ctrl+N or Cmd+N - New chat
+    if (modKey && e.key.toLowerCase() === 'n' && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      createNewSession();
+      return;
+    }
+    
+    // Ctrl+K or Cmd+K - Focus message input
+    if (modKey && e.key.toLowerCase() === 'k' && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      elements.messageInput.focus();
+      return;
+    }
+    
+    // Escape - Close modals and mobile sidebar
+    if (e.key === 'Escape') {
+      // Close shortcuts modal if open
+      if (elements.shortcutsModal.classList.contains('active')) {
+        e.preventDefault();
+        closeShortcutsModal();
+        return;
+      }
+      
+      // Close settings modal if open
+      if (elements.settingsModal.classList.contains('active')) {
+        e.preventDefault();
+        closeSettingsModal();
+        return;
+      }
+      
+      // Close mobile sidebar if open
+      if (elements.sidebar.classList.contains('open')) {
+        e.preventDefault();
+        closeSidebar();
+        return;
+      }
+    }
+  });
+}
+
+// Modal Setup
+function setupModals() {
+  // Keyboard shortcuts modal
+  if (elements.keyboardShortcutsBtn) {
+    elements.keyboardShortcutsBtn.addEventListener('click', openShortcutsModal);
+  }
+  if (elements.shortcutsModalBackdrop) {
+    elements.shortcutsModalBackdrop.addEventListener('click', closeShortcutsModal);
+  }
+  if (elements.shortcutsModalClose) {
+    elements.shortcutsModalClose.addEventListener('click', closeShortcutsModal);
+  }
+  
+  // Settings modal
+  if (elements.settingsBtn) {
+    elements.settingsBtn.addEventListener('click', openSettingsModal);
+  }
+  if (elements.settingsModalBackdrop) {
+    elements.settingsModalBackdrop.addEventListener('click', closeSettingsModal);
+  }
+  if (elements.settingsModalClose) {
+    elements.settingsModalClose.addEventListener('click', closeSettingsModal);
+  }
+  
+  // Settings actions
+  if (elements.testConnectionBtn) {
+    elements.testConnectionBtn.addEventListener('click', testOllamaConnection);
+  }
+  if (elements.saveSettingsBtn) {
+    elements.saveSettingsBtn.addEventListener('click', handleSaveSettings);
+  }
+}
+
+function openShortcutsModal() {
+  elements.shortcutsModal.classList.add('active');
+}
+
+function closeShortcutsModal() {
+  elements.shortcutsModal.classList.remove('active');
+}
+
+function openSettingsModal() {
+  // Load current URL into input
+  elements.ollamaUrlInput.value = ollamaUrl || '';
+  elements.connectionTestResult.style.display = 'none';
+  elements.connectionTestResult.className = 'connection-test-result';
+  elements.settingsModal.classList.add('active');
+}
+
+function closeSettingsModal() {
+  elements.settingsModal.classList.remove('active');
+}
+
+async function testOllamaConnection() {
+  const url = elements.ollamaUrlInput.value.trim();
+  if (!url) {
+    showConnectionTestResult('Please enter an Ollama URL', false);
+    return;
+  }
+  
+  elements.testConnectionBtn.disabled = true;
+  elements.testConnectionBtn.textContent = 'Testing...';
+  
+  try {
+    // Try to fetch models from the Ollama instance
+    const response = await fetch('/api/health', {
+      headers: {
+        'X-Ollama-URL': url
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.ollama_connected) {
+        showConnectionTestResult(`✓ Connected! Found ${data.models_count || 0} models.`, true);
+      } else {
+        showConnectionTestResult('✗ Could not connect to Ollama at this URL', false);
+      }
+    } else {
+      showConnectionTestResult('✗ Could not connect to Ollama at this URL', false);
+    }
+  } catch (error) {
+    showConnectionTestResult('✗ Connection failed: ' + error.message, false);
+  } finally {
+    elements.testConnectionBtn.disabled = false;
+    elements.testConnectionBtn.textContent = 'Test Connection';
+  }
+}
+
+function showConnectionTestResult(message, isSuccess) {
+  elements.connectionTestResult.textContent = message;
+  elements.connectionTestResult.className = 'connection-test-result ' + (isSuccess ? 'success' : 'error');
+}
+
+function handleSaveSettings() {
+  if (saveConfig()) {
+    closeSettingsModal();
+    showSuccess('Settings saved successfully');
+    // Reload models to use the new URL
+    loadModels();
+  } else {
+    showError('Please enter a valid Ollama URL');
+  }
 }
 
 function closeSidebar() {
   elements.sidebar.classList.remove('open');
   elements.overlayBackdrop.classList.remove('active');
+}
+
+function openSidebar() {
+  elements.sidebar.classList.add('open');
+  elements.overlayBackdrop.classList.add('active');
 }
 
 // Event Listeners

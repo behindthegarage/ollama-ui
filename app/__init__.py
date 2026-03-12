@@ -1,6 +1,8 @@
 from flask import Flask
 from flask_cors import CORS
 import os
+import threading
+import time
 from .models import init_db
 from .config import OLLAMA_URL
 
@@ -27,8 +29,29 @@ def create_app():
     # In-memory file storage
     app.file_storage = {}
     
+    # Start periodic cleanup thread
+    start_cleanup_thread(app)
+    
     # Register routes
     from . import routes
     routes.register_routes(app)
     
     return app
+
+def start_cleanup_thread(app):
+    """Start a background thread for periodic file storage cleanup."""
+    def cleanup_worker():
+        from .routes import cleanup_file_storage
+        with app.app_context():
+            while True:
+                try:
+                    time.sleep(600)  # Sleep for 10 minutes
+                    cleanup_file_storage()
+                except Exception as e:
+                    import sys
+                    print(f"Cleanup thread error: {e}", file=sys.stderr)
+    
+    # Start cleanup thread as daemon so it exits with main thread
+    cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
+    cleanup_thread.start()
+    print("File storage cleanup thread started (runs every 10 minutes)")

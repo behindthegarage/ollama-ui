@@ -3,7 +3,7 @@ import re
 import requests
 import uuid
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import request, jsonify, current_app, render_template
 from .config import OLLAMA_URL, MAX_FILE_SIZE
 from .models import get_db_connection
@@ -19,17 +19,74 @@ def is_base64(content):
     pattern = r'^[A-Za-z0-9+/]*={0,2}$'
     return bool(re.match(pattern, content)) and len(content) % 4 == 0
 
+def get_ollama_url():
+    """Get Ollama URL from request header or use default."""
+    custom_url = request.headers.get('X-Ollama-URL')
+    if custom_url:
+        return custom_url
+    return OLLAMA_URL
+
+def cleanup_file_storage():
+    """Remove files older than 1 hour from file_storage."""
+    try:
+        now = datetime.now()
+        expired_keys = []
+        
+        for file_id, file_data in current_app.file_storage.items():
+            uploaded_at = file_data.get('uploaded_at')
+            if uploaded_at and (now - uploaded_at) > timedelta(hours=1):
+                expired_keys.append(file_id)
+        
+        for key in expired_keys:
+            del current_app.file_storage[key]
+            
+        if expired_keys:
+            import sys
+            print(f"Cleaned up {len(expired_keys)} expired files from storage", file=sys.stderr)
+            
+    except Exception as e:
+        import sys
+        print(f"Error during file storage cleanup: {e}", file=sys.stderr)
+
 def register_routes(app):
     
     @app.route('/')
     def index():
         """Serve the main UI."""
         return render_template('index.html')
+    
+    @app.route('/api/config', methods=['GET'])
+    def get_config():
+        """Get current configuration (Ollama URL)."""
+        return jsonify({
+            "ollama_url": OLLAMA_URL,
+            "max_file_size": MAX_FILE_SIZE
+        })
+    
+    @app.route('/api/config', methods=['POST'])
+    def update_config():
+        """Update configuration (runtime only, not persistent)."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body required"}), 400
+            
+            # Note: This is a no-op for now since we use localStorage
+            # But we return success for API compatibility
+            return jsonify({
+                "status": "success",
+                "message": "Configuration is managed client-side via localStorage"
+            })
+            
+        except Exception as e:
+            return jsonify({"error": f"Failed to update config: {str(e)}"}), 500
+    
     @app.route('/api/health', methods=['GET'])
     def health_check():
         """Health check - also fetches Ollama models."""
+        ollama_url = get_ollama_url()
         try:
-            response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+            response = requests.get(f"{ollama_url}/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get('models', [])
                 return jsonify({
@@ -53,9 +110,10 @@ def register_routes(app):
     
     @app.route('/api/models', methods=['GET'])
     def list_models():
-        """List available models from Trantor."""
+        """List available models from Ollama."""
+        ollama_url = get_ollama_url()
         try:
-            response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=10)
+            response = requests.get(f"{ollama_url}/api/tags", timeout=10)
             response.raise_for_status()
             return jsonify(response.json())
         except requests.exceptions.RequestException as e:
@@ -64,6 +122,7 @@ def register_routes(app):
     @app.route('/api/chat', methods=['POST'])
     def chat():
         """Proxy to Ollama with file context injection and vision support."""
+        ollama_url = get_ollama_url()
         try:
             data = request.get_json()
             if not data:
@@ -145,7 +204,7 @@ def register_routes(app):
             print(f"PAYLOAD: {payload}", file=sys.stderr)
             
             response = requests.post(
-                f"{OLLAMA_URL}/api/chat",
+                f"{ollama_url}/api/chat",
                 json=payload,
                 timeout=None
             )
@@ -162,8 +221,11 @@ def register_routes(app):
     
     @app.route('/api/files', methods=['POST'])
     def upload_file():
-        """Upload files - store in memory."""
+        """Upload files - store in memory with cleanup."""
         try:
+            # Run cleanup before adding new file (removes files older than 1 hour)
+            cleanup_file_storage()
+            
             if 'file' not in request.files:
                 return jsonify({"error": "No file provided"}), 400
             
@@ -179,12 +241,13 @@ def register_routes(app):
             
             file_id = str(uuid.uuid4())
             
-            # Store in app file_storage
+            # Store in app file_storage with timestamp
             current_app.file_storage[file_id] = {
                 "id": file_id,
                 "name": file.filename,
                 "size": size,
-                "content": content.decode('utf-8', errors='replace')
+                "content": content.decode('utf-8', errors='replace'),
+                "uploaded_at": datetime.now()
             }
             
             return jsonify({
@@ -200,6 +263,11 @@ def register_routes(app):
     def get_file(file_id):
         """Get file content by id."""
         try:
+            # Run cleanup periodically (every 10th request approx)
+            import random
+            if random.random() < 0.1:
+                cleanup_file_storage()
+            
             file_data = current_app.file_storage.get(file_id)
             if not file_data:
                 return jsonify({"error": "File not found"}), 404
@@ -213,6 +281,23 @@ def register_routes(app):
             
         except Exception as e:
             return jsonify({"error": f"Failed to retrieve file: {str(e)}"}), 500
+
+    @app.route('/api/files/cleanup', methods=['POST'])
+    def manual_cleanup():
+        """Manually trigger file storage cleanup."""
+        try:
+            before_count = len(current_app.file_storage)
+            cleanup_file_storage()
+            after_count = len(current_app.file_storage)
+            removed = before_count - after_count
+            
+            return jsonify({
+                "status": "success",
+                "files_removed": removed,
+                "files_remaining": after_count
+            })
+        except Exception as e:
+            return jsonify({"error": f"Cleanup failed: {str(e)}"}), 500
     
     @app.route('/api/sessions', methods=['GET'])
     def list_sessions():

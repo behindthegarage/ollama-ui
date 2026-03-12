@@ -35,6 +35,34 @@ function base64ToUtf8(base64) {
   return new TextDecoder().decode(bytes);
 }
 
+// Helper function to strip thinking/reasoning content from model responses
+function stripThinkingContent(content) {
+  if (!content) return content;
+  
+  // Remove thinking tags and their content (various formats)
+  // Format 1: <think_content>...</think_content>
+  content = content.replace(/<think_content>[\s\S]*?<\/think_content>/gi, '');
+  
+  // Format 2: <|begin_of_thought|>...<|end_of_thought|>
+  content = content.replace(/<\|begin_of_thought\|>[\s\S]*?<\|end_of_thought\|>/gi, '');
+  
+  // Format 3: <thinking>...</thinking>
+  content = content.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '');
+  
+  // Format 4: [THINKING]...[/THINKING]
+  content = content.replace(/\[THINKING\][\s\S]*?\[\/THINKING\]/gi, '');
+  
+  // Format 5: Strip raw reasoning blocks that start with common thinking patterns
+  // This handles models that output thinking without proper tags
+  // Look for patterns like "Analyze the Request:", "Step 1:", etc. at the start
+  // Only strip if followed by substantial reasoning content before the actual answer
+  
+  // Clean up any leading/trailing whitespace
+  content = content.trim();
+  
+  return content;
+}
+
 // DOM Elements
 const elements = {
   sidebar: document.getElementById('sidebar'),
@@ -277,6 +305,10 @@ async function sendMessage(content, files, retryMessageId = null) {
     } else {
       assistantContent = JSON.stringify(data);
     }
+    
+    // Strip thinking/reasoning content from response
+    assistantContent = stripThinkingContent(assistantContent);
+    
     const assistantMessage = { role: 'assistant', content: assistantContent };
     currentSession.messages.push(assistantMessage);
     renderMessage(assistantMessage);

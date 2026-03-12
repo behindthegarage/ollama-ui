@@ -361,6 +361,133 @@ html, body {
   cursor: not-allowed;
 }
 
+/* Connection Indicator */
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.connection-indicator:hover {
+  background: var(--bg-hover);
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.connection-dot.connected {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.connection-dot.disconnected {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+
+/* Retry Connection Button */
+.retry-connection-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  animation: pulse 2s infinite;
+}
+
+.retry-connection-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.retry-connection-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Failed Message Styling */
+.message.failed .message-bubble {
+  border: 2px solid var(--error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.message.failed .message-content {
+  position: relative;
+}
+
+.message-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--error);
+}
+
+.retry-btn {
+  background: var(--error);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.retry-btn:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+}
+
+.retry-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Error state for model selector */
+.model-selector.error select {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.model-error-text {
+  font-size: 12px;
+  color: var(--error);
+  margin-right: 8px;
+}
+
 /* Messages Container */
 .chat-container {
   flex: 1;
@@ -911,6 +1038,27 @@ html, body {
 .mobile-menu-btn svg {
   width: 24px;
   height: 24px;
+}
+
+/* Mobile responsive for connection indicator */
+@media (max-width: 768px) {
+  .connection-indicator {
+    padding: 4px;
+  }
+  
+  .connection-indicator .connection-dot {
+    width: 10px;
+    height: 10px;
+  }
+  
+  .retry-connection-btn {
+    padding: 8px;
+  }
+  
+  .retry-connection-btn svg {
+    width: 18px;
+    height: 18px;
+  }
 }
 
 /* ============================================

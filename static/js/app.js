@@ -13,6 +13,8 @@ let sessions = [];
 let projects = [];
 let expandedProjects = new Set();
 let loadedPrimaryFiles = new Set(); // Track which projects have had their primary file auto-loaded
+let ollamaConnected = true; // Track Ollama connection status
+let failedMessages = new Map(); // Store failed messages for retry
 
 // Helper function to safely encode UTF-8 strings to base64
 function utf8ToBase64(str) {
@@ -52,7 +54,9 @@ const elements = {
   sendBtn: document.getElementById('sendBtn'),
   attachBtn: document.getElementById('attachBtn'),
   fileInput: document.getElementById('fileInput'),
-  dragOverlay: document.getElementById('dragOverlay')
+  dragOverlay: document.getElementById('dragOverlay'),
+  connectionIndicator: document.getElementById('connectionIndicator'),
+  retryConnectionBtn: document.getElementById('retryConnectionBtn')
 };
 
 // Initialize the app
@@ -73,10 +77,35 @@ async function loadModels() {
 
     models = await response.json();
     populateModelSelector();
+    setOllamaConnectionStatus(true);
   } catch (error) {
-    showError('Failed to load models: ' + error.message);
-    elements.modelSelect.innerHTML = '<option value="" disabled>Error loading models</option>';
+    console.error('Failed to load models:', error);
+    setOllamaConnectionStatus(false);
+    populateModelSelectorError();
   }
+}
+
+function setOllamaConnectionStatus(connected) {
+  ollamaConnected = connected;
+  const dot = elements.connectionIndicator.querySelector('.connection-dot');
+  
+  if (connected) {
+    dot.classList.remove('disconnected');
+    dot.classList.add('connected');
+    elements.retryConnectionBtn.style.display = 'none';
+    elements.modelSelect.disabled = false;
+    elements.modelSelect.parentElement.classList.remove('error');
+  } else {
+    dot.classList.remove('connected');
+    dot.classList.add('disconnected');
+    elements.retryConnectionBtn.style.display = 'flex';
+    elements.modelSelect.disabled = true;
+    elements.modelSelect.parentElement.classList.add('error');
+  }
+}
+
+function populateModelSelectorError() {
+  elements.modelSelect.innerHTML = '<option value="" disabled selected>⚠️ Ollama unavailable</option>';
 }
 
 function populateModelSelector() {
@@ -108,7 +137,7 @@ async function loadSessions() {
   }
 }
 
-async function sendMessage(content, files) {
+async function sendMessage(content, files, retryMessageId = null) {
   if (isLoading) return;
 
   const model = elements.modelSelect.value;
@@ -125,10 +154,19 @@ async function sendMessage(content, files) {
     await createNewSession();
   }
 
+  // Generate message ID for tracking
+  const messageId = retryMessageId || 'msg_' + Date.now();
+
+  // If this is a retry, remove the failed message UI
+  if (retryMessageId) {
+    const failedMsg = document.getElementById(retryMessageId);
+    if (failedMsg) failedMsg.remove();
+  }
+
   // Add user message to UI immediately
   const userMessage = { role: 'user', content, files: files.map(f => ({ name: f.name })) };
   currentSession.messages.push(userMessage);
-  renderMessage(userMessage);
+  renderMessage(userMessage, messageId);
   scrollToBottom();
 
   // Save user message to database
@@ -208,12 +246,78 @@ async function sendMessage(content, files) {
       console.error('Failed to save assistant message:', error);
     }
 
+    // Clear failed message from tracking since it succeeded
+    failedMessages.delete(messageId);
+
   } catch (error) {
     hideLoadingIndicator(loadingId);
-    showError('Failed to send message: ' + error.message);
+    
+    // Store the failed message for retry
+    failedMessages.set(messageId, { content, files });
+    
+    // Mark the message as failed in the UI
+    const messageEl = document.getElementById(messageId);
+    if (messageEl) {
+      messageEl.classList.add('failed');
+      const contentDiv = messageEl.querySelector('.message-content');
+      
+      // Add retry action
+      const errorActions = document.createElement('div');
+      errorActions.className = 'message-error-actions';
+      errorActions.innerHTML = `
+        <span>${escapeHtml(getErrorMessage(error))}</span>
+        <button class="retry-btn" onclick="retryMessage('${messageId}')">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          Retry
+        </button>
+      `;
+      contentDiv.appendChild(errorActions);
+    }
+    
+    // Update connection status if it looks like a connection error
+    if (isConnectionError(error)) {
+      setOllamaConnectionStatus(false);
+    }
   } finally {
     isLoading = false;
     updateSendButton();
+  }
+}
+
+function getErrorMessage(error) {
+  const message = error.message || error.toString();
+  
+  if (message.includes('timeout') || message.includes('ETIMEDOUT')) {
+    return 'Request timed out. The model may be loading or the request took too long.';
+  }
+  if (message.includes('ECONNREFUSED') || message.includes('Failed to fetch')) {
+    return 'Cannot connect to Ollama. Please check if Ollama is running.';
+  }
+  if (message.includes('network') || message.includes('NETWORK')) {
+    return 'Network error. Please check your connection.';
+  }
+  if (message.includes('model') && message.includes('not found')) {
+    return 'Model not found. Please select a different model.';
+  }
+  
+  return 'Failed to send message: ' + message;
+}
+
+function isConnectionError(error) {
+  const message = error.message || error.toString();
+  return message.includes('ECONNREFUSED') || 
+         message.includes('Failed to fetch') ||
+         message.includes('timeout') ||
+         message.includes('ETIMEDOUT') ||
+         message.includes('network');
+}
+
+function retryMessage(messageId) {
+  const failedMsg = failedMessages.get(messageId);
+  if (failedMsg) {
+    sendMessage(failedMsg.content, failedMsg.files, messageId);
   }
 }
 
@@ -288,7 +392,17 @@ async function loadSession(sessionId) {
 
     // Clear and render messages
     elements.chatContainer.innerHTML = '';
-    messages.forEach(msg => renderMessage(msg));
+    messages.forEach((msg, index) => {
+      // Parse files from message if stored as JSON string
+      if (msg.files && typeof msg.files === 'string') {
+        try {
+          msg.files = JSON.parse(msg.files);
+        } catch (e) {
+          msg.files = [];
+        }
+      }
+      renderMessage(msg, 'loaded_msg_' + index);
+    });
 
     elements.chatTitle.textContent = sessionData.title;
     renderSessionList();
@@ -497,12 +611,15 @@ async function addProjectFileToContext(projectName, file) {
   }
 }
 
-function renderMessage(message) {
+function renderMessage(message, messageId = null) {
   // Hide welcome screen if visible
   elements.welcomeScreen.style.display = 'none';
 
   const messageEl = document.createElement('div');
   messageEl.className = `message ${message.role}`;
+  if (messageId) {
+    messageEl.id = messageId;
+  }
 
   const avatar = message.role === 'user' ? 'U' : 'AI';
   const renderedContent = renderMarkdown(message.content);
@@ -696,6 +813,13 @@ function setupEventListeners() {
   // Mobile menu
   elements.mobileMenuBtn.addEventListener('click', openSidebar);
   elements.overlayBackdrop.addEventListener('click', closeSidebar);
+
+  // Retry connection button
+  if (elements.retryConnectionBtn) {
+    elements.retryConnectionBtn.addEventListener('click', () => {
+      loadModels();
+    });
+  }
 
   // Send message
   elements.sendBtn.addEventListener('click', () => {
